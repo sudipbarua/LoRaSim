@@ -8,6 +8,7 @@
  International License. To view a copy of this license,
  visit http://creativecommons.org/licenses/by/4.0/.
 
+
  Do LoRa Low-Power Wide-Area Networks Scale? Martin Bor, Utz Roedig, Thiemo Voigt
  and Juan Alonso, MSWiM '16, http://dx.doi.org/10.1145/2988287.2989163
 
@@ -57,7 +58,7 @@ import matplotlib.pyplot as plt
 import os
 
 # turn on/off graphics
-graphics = 0
+graphics = 1
 
 # do the full collision check
 full_collision = False
