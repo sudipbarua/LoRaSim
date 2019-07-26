@@ -83,6 +83,7 @@ sf12 = np.array([12,-133.25,-132.25,-132.25])
 # check for collisions at base station
 # Note: called before a packet (or rather node) is inserted into the list
 def checkcollision(packet):
+
     col = 0 # flag needed since there might be several collisions for packet
     processing = 0
     for i in range(0,len(packetsAtBS)):
@@ -387,7 +388,7 @@ class myPacket():
 #
 def transmit(env,node):
     while True:
-        yield env.timeout(random.expovariate(1.0/float(node.period)))
+        yield env.timeout(486710.38)
 
         # time sending and receiving
         # packet arrives -> add to base station
@@ -423,7 +424,8 @@ def transmit(env,node):
             nrReceived = nrReceived + 1
         if node.packet.processed == 1:
             global nrProcessed
-            nrProcessed = nrProcessed + 1
+            nrProcessed =\
+                nrProcessed + 1
 
         # complete packet has been received by base station
         # can remove it
