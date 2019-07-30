@@ -386,9 +386,17 @@ class myPacket():
 # a global list of packet being processed at the gateway
 # is maintained
 #
+# modification fonction transmit pour faire du Alloha sloté ligne 393-399 by IKF
 def transmit(env,node):
     while True:
-        yield env.timeout(486710.38)
+
+      A = random.expovariate(1.0/float(node.period))
+      if A == random.randint(1,10):
+
+        yield env.timeout(A)
+      else if A!= random.randint(1,10)
+        B = random.randint(1,10)
+        yield env.timeout(B)
 
         # time sending and receiving
         # packet arrives -> add to base station
