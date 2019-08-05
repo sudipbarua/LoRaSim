@@ -422,8 +422,8 @@ class myPacket():
 def transmit(env,node):
     while True:
         # Pure Aloha
-        A = random.expovariate(1.0/float(node.period))
-        yield env.timeout(A)
+        # A = random.expovariate(1.0/float(node.period))
+        # yield env.timeout(A)
         
         # Aloha slotted
         # uncomment the following line to use Aloha slotted medium access protocol
@@ -432,7 +432,9 @@ def transmit(env,node):
         #else if A!= random.randint(1,10):
         #    B = random.randint(1,10)
         #    yield env.timeout(B)
-
+        A = random.expovariate(1.0 / float(node.period))
+        if A in transmit_instant:
+            yield env.timeout(A)
         # time sending and receiving
         # packet arrives -> add to base station
 
@@ -491,6 +493,9 @@ if len(sys.argv) >= 5:
     avgSendTime = int(sys.argv[2])
     experiment = int(sys.argv[3])
     simtime = int(sys.argv[4])
+    #instant de transmission et durée d'un slot by IF
+    slot_time = 1
+    transmit_instant = np.arange(0,simtime,slot_time)
     if len(sys.argv) > 5:
         full_collision = bool(int(sys.argv[5]))
     print ("Nodes:", nrNodes)
