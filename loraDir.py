@@ -62,7 +62,7 @@ import os
 # 2 : ERROR mode : only error messages are printed
 # 3 : DEBUG mode : all messages are printed
 # Default mode is SILENT mode
-verbose = 0
+verbose = 1
 
 # turn on/off graphics
 graphics = 0
@@ -252,7 +252,6 @@ class myNode():
         found = 0
         rounds = 0
         global nodes
-        global verbose
         while (found == 0 and rounds < 100):
             a = random.random()
             b = random.random()
@@ -305,9 +304,6 @@ class myPacket():
         global var
         global Lpld0
         global GL
-
-        # for verbose mode
-        global verbose
 
         self.nodeid = nodeid
         self.txpow = Ptx
@@ -432,9 +428,22 @@ def transmit(env,node):
         #else if A!= random.randint(1,10):
         #    B = random.randint(1,10)
         #    yield env.timeout(B)
+        global transmit_instant
+        global slot_time
+        global verbose
         A = random.expovariate(1.0 / float(node.period))
+        if (verbose>=1):
+            print("INFO: transmission is scheduled at ", env.now + A)
+
         if A in transmit_instant:
             yield env.timeout(A)
+        else:
+            deltaT = slot_time - (A%slot_time)
+            A = A + deltaT
+            if (verbose>=1):
+                print("INFO: transmission of the packet is delayed of ", deltaT, "[ s]")
+            yield env.timeout(A)
+
         # time sending and receiving
         # packet arrives -> add to base station
 
@@ -494,7 +503,7 @@ if len(sys.argv) >= 5:
     experiment = int(sys.argv[3])
     simtime = int(sys.argv[4])
     #instant de transmission et durée d'un slot by IF
-    slot_time = 1
+    slot_time = 2
     transmit_instant = np.arange(0,simtime,slot_time)
     if len(sys.argv) > 5:
         full_collision = bool(int(sys.argv[5]))
