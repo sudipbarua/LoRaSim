@@ -1,2 +1,5 @@
 *.dat
 .idea/
+.venv/
+figures/
+*.txt
