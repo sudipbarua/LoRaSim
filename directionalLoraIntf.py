@@ -68,7 +68,7 @@ import os
 from matplotlib.patches import Rectangle
 
 # turn on/off graphics
-graphics = 0
+graphics = 1
 
 # do the full collision check
 full_collision = False
@@ -588,7 +588,7 @@ class myPacket():
         # mark the packet as lost when it's rssi is below the sensitivity
         # don't do this for experiment 3, as it requires a bit more work
         if experiment != 3:
-            global minsensi
+            # global minsensi
             self.lost = self.rssi < minsensi
             print "node {} bs {} lost {}".format(self.nodeid, self.bs, self.lost)
 
@@ -689,7 +689,7 @@ if len(sys.argv) == 10:
     print "baseDist: ", baseDist   # x-distance between the two base stations
 
 else:
-    print "usage: ./directionalLoraIntf.py <nodes> <avgsend> <experiment> <simtime> <collision> <directionality> <networks> <basedist>"
+    print "usage: ./directionalLoraIntf.py <nodes> <avgsend> <experiment> <simtime> <nrBS> <collision> <directionality> <networks> <basedist>"
     print "experiment 0 and 1 use 1 frequency only"
     exit(-1)
 

@@ -18,7 +18,7 @@
 
 """
  SYNOPSIS:
-   ./loraDir.py <nodes> <avgsend> <experiment> <simtime> [collision]
+   ./adrSim.py <nodes> <avgsend> <experiment> <simtime> [collision]
  DESCRIPTION:
     nodes
         number of nodes to simulate
@@ -49,7 +49,7 @@
     data file can be easily plotted using e.g. gnuplot.
     
  EXAMPLE
-    > python loraDir.py 100 1000000 1 5011200000
+    > python adrSim.py 100 1000000 1 5011200000
 
 """
 
@@ -67,10 +67,13 @@ import os
 # 2 : ERROR mode : only error messages are printed
 # 3 : DEBUG mode : all messages are printed
 # Default mode is SILENT mode
-verbose = 1
+verbose = 3
 
 # turn on/off graphics
 graphics = 0
+
+# enable/disable ADR
+enableAdr = 1
 
 # do the full collision check
 full_collision = True
@@ -104,7 +107,7 @@ def checkcollision(packet):
             processing = processing + 1
     if (processing > maxBSReceives):
         if (verbose>=1):
-            print("INFO: too long:", len(packetsAtBS))
+            print(f"INFO node {packet.nodeid}: too long:", len(packetsAtBS))
         packet.processed = 0
     else:
         packet.processed = 1
@@ -158,7 +161,7 @@ def frequencyCollision(p1,p2):
             if (verbose>=1):
                 print ("INFO: frequency coll 125")
             return True
-        #else:
+        else:
             if (verbose>=1):
                 print ("INFO: no frequency coll")
     return False
@@ -251,6 +254,8 @@ class myNode():
         self.bs = bs
         self.x = 0
         self.y = 0
+        self.rssi_history = []
+        self.snr_history = []
 
         # this is very complex prodecure for placing nodes
         # and ensure minimum distance between each pair of nodes
@@ -314,29 +319,10 @@ class myPacket():
         self.txpow = Ptx
 
         # randomize configuration values
-        self.sf = random.randint(6,12)
+        self.sf = random.randint(7,12)
         self.cr = random.randint(1,4)
-        self.bw = random.choice([125, 250, 500])
+        self.bw = 125
 
-        # for certain experiments override these
-        if experiment==1 or experiment == 0:
-            self.sf = 12
-            self.cr = 4
-            self.bw = 125
-
-        # for certain experiments override these
-        if experiment==2:
-            self.sf = 6
-            self.cr = 1
-            self.bw = 500
-        # lorawan
-        if experiment == 4:
-            self.sf = 12
-            self.cr = 1
-            self.bw = 125
-
-
-        # for experiment 3 find the best setting
         # OBS, some hardcoded values
         Prx = self.txpow  ## zero path loss by default
 
@@ -346,47 +332,7 @@ class myPacket():
             print ("INFO: Lpl:", Lpl)
         Prx = self.txpow - GL - Lpl
 
-        if (experiment == 3) or (experiment == 5):
-            minairtime = 9999
-            minsf = 0
-            minbw = 0
-
-            if (verbose>=1):
-                print ("INFO: Prx:", Prx)
-
-            for i in range(0,6):
-                for j in range(1,4):
-                    if (sensi[i,j] < Prx):
-                        self.sf = int(sensi[i,0])
-                        if j==1:
-                            self.bw = 125
-                        elif j==2:
-                            self.bw = 250
-                        else:
-                            self.bw=500
-                        at = airtime(self.sf, 1, plen, self.bw)
-                        if at < minairtime:
-                            minairtime = at
-                            minsf = self.sf
-                            minbw = self.bw
-                            minsensi = sensi[i, j]
-            if (minairtime == 9999):
-                if (verbose>=1):
-                    print ("INFO: does not reach base station")
-                exit(-1)
-            if (verbose>=1):
-                print ("INFO: best sf:", minsf, " best bw: ", minbw, "best airtime:", minairtime)
-            self.rectime = minairtime
-            self.sf = minsf
-            self.bw = minbw
-            self.cr = 1
-
-            if experiment == 5:
-                # reduce the txpower if there's room left
-                self.txpow = max(2, self.txpow - math.floor(Prx - minsensi))
-                Prx = self.txpow - GL - Lpl
-                if (verbose>=1):
-                    print ('INFO: minsesi {} best txpow {}'.format(minsensi, self.txpow))
+        self.rectime = airtime(self.sf, 1, plen, self.bw)
 
         # transmission range, needs update XXX
         self.transRange = 150
@@ -394,22 +340,31 @@ class myPacket():
         self.symTime = (2.0**self.sf)/self.bw
         self.arriveTime = 0
         self.rssi = Prx
+
+        # SNR Calculation
+        noiseFloor = 6
+        self.snr = self.rssi + 174 -10*math.log10(self.bw * 1000) - noiseFloor  # The bandwidth is in kHz. So we multiply by 1000
+
         # frequencies: lower bound + number of 61 Hz steps
         self.freq = 860000000 + random.randint(0,2622950)
 
         # for certain experiments override these and
         # choose some random frequences
         if experiment == 1:
-            self.freq = random.choice([86000000, 864000000, 868000000])
+            self.freq = random.choice([860000000, 864000000, 868000000])
         else:
             self.freq = 860000000
 
+        if (verbose>=1):
+            print ("INFO: node {}: snr {} rssi {}".format(nodeid, self.snr, self.rssi))
+        
         if (verbose>=1):
             print ("INFO: frequency" ,self.freq, "symTime ", self.symTime)
             print ("INFO: bw", self.bw, "sf", self.sf, "cr", self.cr, "rssi", self.rssi)
         self.rectime = airtime(self.sf,self.cr,self.pl,self.bw)
         if (verbose>=1):
             print ("INFO: rectime node ", self.nodeid, "  ", self.rectime)
+
         # denote if packet is collided
         self.collided = 0
         self.processed = 0
@@ -422,17 +377,6 @@ class myPacket():
 # modification fonction transmit pour faire du Alloha sloté ligne 393-399 by IKF
 def transmit(env,node):
     while True:
-        # Pure Aloha
-        # A = random.expovariate(1.0/float(node.period))
-        # yield env.timeout(A)
-        
-        # Aloha slotted
-        # uncomment the following line to use Aloha slotted medium access protocol
-        #if A == random.randint(1,10):
-        #    yield env.timeout(A)
-        #else if A!= random.randint(1,10):
-        #    B = random.randint(1,10)
-        #    yield env.timeout(B)
         global transmit_instant
         global slot_time
         global verbose
@@ -450,6 +394,7 @@ def transmit(env,node):
                 print("INFO: new transmission is scheduled at ", env.now + A)
             yield env.timeout(A)
 
+        
         # time sending and receiving
         # packet arrives -> add to base station
 
@@ -483,13 +428,35 @@ def transmit(env,node):
             nrCollisions = nrCollisions +1
         if node.packet.collided == 0 and not node.packet.lost:
             global nrReceived
-            nrReceived = nrReceived + 1
+            nrReceived += 1
+
         if node.packet.processed == 1:
             global nrProcessed
-            nrProcessed =\
-                nrProcessed + 1
+            nrProcessed += 1
 
         # complete packet has been received by base station
+        if verbose >= 1:
+            print ("INFO: node {}: packet received".format(node.nodeid))
+
+        ############## ADR calculation for the next packet ##############
+        node.snr_history.append(node.packet.snr)
+        node.rssi_history.append(node.packet.rssi)
+        if len(node.rssi_history) > 10:
+            node.rssi_history.pop(0)
+        if len(node.snr_history) > 10:
+            node.snr_history.pop(0)
+        
+        m_snr = np.mean(node.snr_history)
+        if enableAdr==1:
+            if (verbose>=1):
+                print("INFO: node {}: old sf {} old txpow {}".format(node.nodeid, node.packet.sf, node.packet.txpow))
+            node.packet.sf, node.packet.txpow = adr_algorithm(node.packet.sf, node.packet.txpow, m_snr)
+            if (verbose>=1):
+                print ("INFO: node {}: new sf {} new txpow {}".format(node.nodeid, node.packet.sf, node.packet.txpow))
+
+        if verbose > 2:
+            print ("DEBUG: node {}: SNR History list {}".format(node.nodeid, node.snr_history))
+
         # can remove it
         if (node in packetsAtBS):
             packetsAtBS.remove(node)
@@ -498,31 +465,74 @@ def transmit(env,node):
         node.packet.processed = 0
         node.packet.lost = False
 
+        
+snr_threshold = [-7.5, -10.0, -12.5, -15.0, -17.5, -20.0]
+
+def adr_algorithm(sf, txppow, m_snr):
+    """
+    Implements the ADR algorithm for a given node.
+    Adjusts the transmission power (TxPower) and data rate (DR) based on the flowchart.
+    """
+    max_tx_power = 14  # Maximum TxPower in dBm
+    min_tx_power = 2   # Minimum TxPower in dBm
+    min_sf = 7  
+    req_snr = snr_threshold[sf - 7]  # SNR threshold for the current SF
+    margin_snr = m_snr - req_snr
+    nstep = margin_snr / 3
+
+    while nstep > 0 and sf > min_sf:
+        sf -= 1
+        nstep -= 1
+
+    while nstep > 0 and txppow > min_tx_power:
+        txppow -= 3
+        nstep -= 1
+
+    while nstep < 0 and sf < max_tx_power:
+        txppow += 3
+        nstep += 1
+    return sf, txppow
+
 #
 # "main" program
 #
+global loop 
+loop = 0
 
-# get arguments
-if len(sys.argv) >= 5:
-    nrNodes = int(sys.argv[1])
-    avgSendTime = int(sys.argv[2])
-    experiment = int(sys.argv[3])
-    simtime = int(sys.argv[4])
-    #instant de transmission et durée d'un slot by IF
-    #instant of transmission and duration of a slot by IF
-    slot_time = 1000
-    transmit_instant = np.arange(0,simtime,slot_time)
-    if len(sys.argv) > 5:
-        full_collision = bool(int(sys.argv[5]))
-    print ("Nodes:", nrNodes)
-    print ("AvgSendTime (exp. distributed):",avgSendTime)
-    print ("Experiment: ", experiment)
-    print ("Simtime: ", simtime)
-    print ("Full Collision: ", full_collision)
-else:
-    print ("usage: ./loraDir <nodes> <avgsend> <experiment> <simtime> [collision]")
-    print ("experiment 0 and 1 use 1 frequency only")
-    exit(-1)
+
+nrNodes = 1000
+avgSendTime = 1000000
+experiment = 3
+# simtime = 5011200000
+simtime = 10000000
+slot_time = 1000
+transmit_instant = np.arange(0,simtime,slot_time)
+print ("Nodes:", nrNodes)
+print ("AvgSendTime (exp. distributed):",avgSendTime)
+print ("Experiment: ", experiment)
+print ("Simtime: ", simtime)
+print ("Full Collision: ", full_collision)
+
+# # get arguments
+# if len(sys.argv) >= 5:
+#     nrNodes = int(sys.argv[1])
+#     avgSendTime = int(sys.argv[2])
+#     experiment = int(sys.argv[3])
+#     simtime = int(sys.argv[4])
+#     #instant de transmission et durée d'un slot by IF
+#     slot_time = 1000
+#     transmit_instant = np.arange(0,simtime,slot_time)
+#     if len(sys.argv) > 5:
+#         full_collision = bool(int(sys.argv[5]))
+#     print ("Nodes:", nrNodes)
+#     print ("AvgSendTime (exp. distributed):",avgSendTime)
+#     print ("Experiment: ", experiment)
+#     print ("Simtime: ", simtime)
+#     print ("Full Collision: ", full_collision)
+# else:
+#     print ("usage: ./adrSim <nodes> <avgsend> <experiment> <simtime> [collision]")
+#     print ("experiment 0 and 1 use 1 frequency only")
+#     exit(-1)
 
 
 # global stuff
