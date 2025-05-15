@@ -70,7 +70,7 @@ import os
 verbose = 3
 
 # turn on/off graphics
-graphics = 0
+graphics = 1
 
 # enable/disable ADR
 enableAdr = 1
@@ -256,6 +256,10 @@ class myNode():
         self.y = 0
         self.rssi_history = []
         self.snr_history = []
+        self.sf = 12
+        self.txpow = 14
+        self.packetlen = packetlen
+        self.adr_ack_cnt = 0
 
         # this is very complex prodecure for placing nodes
         # and ensure minimum distance between each pair of nodes
@@ -306,9 +310,8 @@ class myNode():
 # it also sets all parameters, currently random
 #
 class myPacket():
-    def __init__(self, nodeid, plen, distance):
+    def __init__(self, nodeid, plen, distance, sf=12, txpow=14):
         global experiment
-        global Ptx
         global gamma
         global d0
         global var
@@ -316,10 +319,9 @@ class myPacket():
         global GL
 
         self.nodeid = nodeid
-        self.txpow = Ptx
-
+        self.txpow = txpow
+        self.sf = sf
         # randomize configuration values
-        self.sf = random.randint(7,12)
         self.cr = random.randint(1,4)
         self.bw = 125
 
@@ -327,7 +329,9 @@ class myPacket():
         Prx = self.txpow  ## zero path loss by default
 
         # log-shadow
-        Lpl = Lpld0 + 10*gamma*math.log10(distance/d0)
+        shadowing_sigma = 4  # standard deviation in dB, typical values: 4-8
+        shadowing = np.random.normal(0, shadowing_sigma)
+        Lpl = Lpld0 + 10*gamma*math.log10(distance/d0) + shadowing  # Shadowing added to have a more realistic model
         if (verbose>=1):
             print ("INFO: Lpl:", Lpl)
         Prx = self.txpow - GL - Lpl
@@ -380,6 +384,7 @@ def transmit(env,node):
         global transmit_instant
         global slot_time
         global verbose
+        global adr_ack_limit
         A = random.expovariate(1.0 / float(node.period))
         if (verbose>=1):
             print("INFO: transmission is scheduled at ", env.now + A)
@@ -394,7 +399,9 @@ def transmit(env,node):
                 print("INFO: new transmission is scheduled at ", env.now + A)
             yield env.timeout(A)
 
-        
+        # Create a new packet with latest ADR settings
+        node.packet = myPacket(node.nodeid, node.packetlen, node.dist, sf=node.sf, txpow=node.txpow)
+
         # time sending and receiving
         # packet arrives -> add to base station
 
@@ -406,7 +413,7 @@ def transmit(env,node):
             sensitivity = sensi[node.packet.sf - 7, [125,250,500].index(node.packet.bw) + 1]
             if node.packet.rssi < sensitivity:
                 if (verbose>=1):
-                    print ("INFO: node {}: packet will be lost").format(node.nodeid)
+                    print (f"INFO: node {node.nodeid}: packet will be lost")
                 node.packet.lost = True
             else:
                 node.packet.lost = False
@@ -438,22 +445,33 @@ def transmit(env,node):
         if verbose >= 1:
             print ("INFO: node {}: packet received".format(node.nodeid))
 
-        ############## ADR calculation for the next packet ##############
+        ############## NS side ADR calculation for the next packet ##############
         node.snr_history.append(node.packet.snr)
         node.rssi_history.append(node.packet.rssi)
         if len(node.rssi_history) > 10:
             node.rssi_history.pop(0)
-        if len(node.snr_history) > 10:
+        if len(node.snr_history) > 20:
             node.snr_history.pop(0)
         
         m_snr = np.mean(node.snr_history)
-        if enableAdr==1:
+        if enableAdr==1 and len(node.snr_history) == 20:
             if (verbose>=1):
                 print("INFO: node {}: old sf {} old txpow {}".format(node.nodeid, node.packet.sf, node.packet.txpow))
-            node.packet.sf, node.packet.txpow = adr_algorithm(node.packet.sf, node.packet.txpow, m_snr)
+            node.sf, node.txpow = ns_adr_algorithm(node.packet.sf, node.packet.txpow, m_snr)
+            ######################## Simplified ED side ADR: Check if adr_ack_cnt > adr_ack_limit ########################
+            if node.packet.lost or node.packet.collided==1:
+                node.adr_ack_cnt += 1  
+                if node.adr_ack_cnt > adr_ack_limit and node.sf < 12:
+                    node.sf += 1
+            else:
+                node.adr_ack_cnt = 0
+            ##############################################################################################################
             if (verbose>=1):
-                print ("INFO: node {}: new sf {} new txpow {}".format(node.nodeid, node.packet.sf, node.packet.txpow))
-
+                print ("INFO: node {}: new sf {} new txpow {}".format(node.nodeid, node.sf, node.txpow))
+        else:
+            node.sf = random.randint(7,12)
+            node.txpow = random.randint(2,14)
+        #########################################################################
         if verbose > 2:
             print ("DEBUG: node {}: SNR History list {}".format(node.nodeid, node.snr_history))
 
@@ -468,7 +486,7 @@ def transmit(env,node):
         
 snr_threshold = [-7.5, -10.0, -12.5, -15.0, -17.5, -20.0]
 
-def adr_algorithm(sf, txppow, m_snr):
+def ns_adr_algorithm(sf, txpow, m_snr):
     """
     Implements the ADR algorithm for a given node.
     Adjusts the transmission power (TxPower) and data rate (DR) based on the flowchart.
@@ -484,14 +502,14 @@ def adr_algorithm(sf, txppow, m_snr):
         sf -= 1
         nstep -= 1
 
-    while nstep > 0 and txppow > min_tx_power:
-        txppow -= 3
+    while nstep > 0 and txpow > min_tx_power:
+        txpow -= 3
         nstep -= 1
 
-    while nstep < 0 and sf < max_tx_power:
-        txppow += 3
+    while nstep < 0 and txpow < max_tx_power:
+        txpow += 3
         nstep += 1
-    return sf, txppow
+    return sf, txpow
 
 #
 # "main" program
@@ -499,12 +517,13 @@ def adr_algorithm(sf, txppow, m_snr):
 global loop 
 loop = 0
 
+adr_ack_limit = 16
 
-nrNodes = 1000
-avgSendTime = 1000000
+nrNodes = 50
+avgSendTime = 1000
 experiment = 3
-# simtime = 5011200000
-simtime = 10000000
+simtime = 100000
+# simtime = 10000000
 slot_time = 1000
 transmit_instant = np.arange(0,simtime,slot_time)
 print ("Nodes:", nrNodes)
@@ -634,7 +653,7 @@ print ("DER method 2:", der)
 
 # this can be done to keep graphics visible
 if (graphics == 1):
-    raw_input('Press Enter to continue ...')
+    input('Press Enter to continue ...')
 
 # save experiment data into a dat file that can be read by e.g. gnuplot
 # name of file would be:  exp0.dat for experiment 0
